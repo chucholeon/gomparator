@@ -47,12 +47,10 @@ func Equal(vx, vy interface{}) bool {
 				if Equal(v, v2) && !flagged[i] {
 					matches++
 					flagged[i] = true
-
 					break
 				}
 			}
 		}
-
 		return matches == len(x)
 	default:
 		return vx == vy
@@ -81,7 +79,6 @@ func Remove(i interface{}, path string) {
 				// If there is no more nodes to traverse we can remove it and terminate the routine
 				if next == "" {
 					delete(t, current)
-
 					return
 				}
 				Remove(v, next)

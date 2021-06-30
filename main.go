@@ -71,14 +71,13 @@ func newApp() *cli.App {
 			Value:   0,
 			Usage:   "duration of the comparison [0 = forever]",
 		},
-		&cli.StringFlag{
+		&cli.StringSliceFlag{
 			Name:  "exclude",
 			Usage: "excludes a value from both json for the specified path. A path is a series of keys separated by a dot or #",
 		},
 	}
 
 	app.Action = action
-
 	return app
 }
 
@@ -102,7 +101,22 @@ type options struct {
 	rateLimit      int
 	statusCodeOnly bool
 	maxBody        int64
-	exclude        string
+	exclude        []string
+}
+
+func checkBoom(file *os.File) bool {
+	var bom [3]byte
+
+	_, err := io.ReadFull(file, bom[:])
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	if bom[0] != 0xef || bom[1] != 0xbb || bom[2] != 0xbf {
+		return false
+	}
+
+	return true
 }
 
 func action(c *cli.Context) error {
@@ -119,8 +133,15 @@ func action(c *cli.Context) error {
 	file := openFile(opts)
 	defer file.Close()
 
+	boom := checkBoom(file)
+
 	logFile := createTmpFile()
 	defer logFile.Close()
+
+	errorsLineLogFile := createTmpFile()
+	defer errorsLineLogFile.Close()
+
+	log.Printf("created file for errors line in %s", errorsLineLogFile.Name())
 
 	log.Printf("created log temp file in %s", logFile.Name())
 	log.SetOutput(logFile)
@@ -128,7 +149,13 @@ func action(c *cli.Context) error {
 	lines := getTotalLines(file)
 	// Once we count the number of lines that will be used as total for the progress bar we reset
 	// the pointer to the beginning of the file since it is much faster than closing and reopening
-	_, err := file.Seek(0, 0)
+	var err error
+	if !boom {
+		_, err = file.Seek(0, 0)
+	} else {
+		_, err = file.Seek(3, 0)
+	}
+
 	if err != nil {
 		return err
 	}
@@ -137,14 +164,15 @@ func action(c *cli.Context) error {
 	bar.Start()
 
 	reader := NewReader(file, opts.hosts)
+
 	producer := NewProducer(opts.workers, headers,
 		ratelimit.New(opts.rateLimit), fetcher)
-	comparator := NewConsumer(opts.statusCodeOnly, bar, log.StandardLogger(), opts.exclude)
+
+	comparator := NewConsumer(opts.statusCodeOnly, bar, log.StandardLogger(), opts.exclude, errorsLineLogFile)
 	p := New(reader, producer, comparator)
 
 	p.Run(ctx)
 	bar.Stop()
-
 	return nil
 }
 
@@ -152,6 +180,7 @@ func createContext(opts *options) (context.Context, context.CancelFunc) {
 	var ctx context.Context
 	var cancel context.CancelFunc
 	t := opts.duration
+
 	if t == 0 {
 		ctx, cancel = context.WithCancel(context.Background())
 	} else {
@@ -168,7 +197,6 @@ func openFile(opts *options) *os.File {
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	return file
 }
 
@@ -178,7 +206,6 @@ func createTmpFile() *os.File {
 	if err != nil {
 		log.Fatal(err)
 	}
-
 	return logFile
 }
 
@@ -211,12 +238,14 @@ func parseFlags(c *cli.Context) *options {
 	opts.workers = c.Int("workers")
 	opts.rateLimit = c.Int("ratelimit")
 	opts.statusCodeOnly = c.Bool("status-code-only")
+
 	if opts.statusCodeOnly {
 		opts.maxBody = 0
 	} else {
 		opts.maxBody = DefaultMaxBody
 	}
-	opts.exclude = c.String("exclude")
+
+	opts.exclude = c.StringSlice("exclude")
 
 	return opts
 }
