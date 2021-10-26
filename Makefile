@@ -3,14 +3,14 @@ PACKAGES = $(shell go list ./...)
 PACKAGES_PATH = $(shell go list -f '{{ .Dir }}' ./...)
 
 .PHONY: all
-all: check_tools ensure-deps fmt imports linter test
+all: check_tools mod-tidy fmt imports linter test
 
 .PHONY: check_tools
 check_tools:
 	@type "golangci-lint" > /dev/null 2>&1 || echo 'Please install golangci-lint: https://golangci-lint.run/usage/install/#local-installation'
 
-.PHONY: ensure-deps
-ensure-deps:
+.PHONY: mod-tidy
+mod-tidy:
 	@echo "=> Syncing dependencies with go mod tidy"
 	@go mod tidy
 
